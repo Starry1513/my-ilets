@@ -171,6 +171,75 @@ function handleImport() {
   }
 }
 
+// 处理文件上传
+const fileInputRef = ref<HTMLInputElement | null>(null)
+
+function handleFileSelect() {
+  fileInputRef.value?.click()
+}
+
+function handleFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+
+  if (!file) {
+    return
+  }
+
+  if (!file.name.endsWith('.json')) {
+    importResult.value = '请选择JSON格式的文件'
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const content = e.target?.result as string
+    if (content) {
+      importText.value = content
+      importResult.value = '文件已加载，点击"导入"按钮完成导入'
+    }
+  }
+  reader.onerror = () => {
+    importResult.value = '文件读取失败，请重试'
+  }
+  reader.readAsText(file)
+
+  // 清空input，允许重复选择同一个文件
+  input.value = ''
+}
+
+// 自动导入项目内的错题本JSON文件
+async function handleAutoImport() {
+  try {
+    importResult.value = '正在读取项目错题本文件...'
+    const response = await fetch('/data/error-book.json')
+
+    if (!response.ok) {
+      importResult.value = '项目中未找到错题本文件（/data/error-book.json）'
+      return
+    }
+
+    const content = await response.text()
+    importText.value = content
+
+    // 自动执行导入
+    const result = importErrorBook(content)
+    importResult.value = result.message
+
+    if (result.success) {
+      loadErrorWords()
+      setTimeout(() => {
+        showImportDialog.value = false
+        importText.value = ''
+        importResult.value = ''
+      }, 2000)
+    }
+  }
+  catch (error) {
+    importResult.value = `读取失败: ${error instanceof Error ? error.message : '未知错误'}`
+  }
+}
+
 function handleAddWord() {
   if (!newWord.value.word.trim() || !newWord.value.meaning.trim() || !newWord.value.category.trim()) {
     alert('请填写单词、词义和分类')
@@ -1091,6 +1160,38 @@ onUnmounted(() => {
         <h3 class="mb-4 text-xl font-bold text-gray-900 dark:text-white">
           导入错题本
         </h3>
+
+        <!-- 文件上传按钮 -->
+        <div class="mb-4 flex justify-center gap-3">
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept=".json"
+            class="hidden"
+            @change="handleFileChange"
+          >
+          <button
+            type="button"
+            class="rounded-lg bg-green-600 px-6 py-3 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-300 dark:bg-green-600 dark:hover:bg-green-700 dark:focus:ring-green-800 flex items-center gap-2"
+            @click="handleFileSelect"
+          >
+            <i class="i-ph-file-arrow-up-bold text-lg" />
+            选择本地JSON文件
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 dark:bg-indigo-600 dark:hover:bg-indigo-700 dark:focus:ring-indigo-800 flex items-center gap-2"
+            @click="handleAutoImport"
+          >
+            <i class="i-ph-download-simple-bold text-lg" />
+            自动导入项目错题本
+          </button>
+        </div>
+
+        <div class="mb-4 text-center text-sm text-gray-500 dark:text-gray-400">
+          或者手动粘贴JSON内容
+        </div>
+
         <textarea
           v-model="importText"
           rows="10"
