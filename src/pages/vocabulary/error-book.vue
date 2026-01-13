@@ -17,6 +17,8 @@ const showImportDialog = ref(false)
 const showAddDialog = ref(false)
 const importText = ref('')
 const importResult = ref('')
+const showGitSyncDialog = ref(false)
+const gitSyncStep = ref(1) // 当前同步步骤
 
 // 复习计划相关
 const showReviewPlan = ref(true)
@@ -237,6 +239,42 @@ async function handleAutoImport() {
   }
   catch (error) {
     importResult.value = `读取失败: ${error instanceof Error ? error.message : '未知错误'}`
+  }
+}
+
+// Git同步功能
+function handleGitSync() {
+  showGitSyncDialog.value = true
+  gitSyncStep.value = 1
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  }
+  catch {
+    // 降级方案
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const success = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return success
+  }
+}
+
+async function exportAndCopy() {
+  const json = exportErrorBook()
+  const success = await copyToClipboard(json)
+  if (success) {
+    gitSyncStep.value = 2
+  }
+  else {
+    alert('复制失败，请手动复制下面的JSON内容')
   }
 }
 
@@ -706,6 +744,15 @@ onUnmounted(() => {
             >
               <i class="i-ph-upload-bold mr-1" />
               导入
+            </button>
+            <button
+              type="button"
+              class="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-4 focus:ring-orange-300 dark:bg-orange-600 dark:hover:bg-orange-700 dark:focus:ring-orange-800"
+              @click="handleGitSync"
+              title="通过Git同步错题本到其他电脑"
+            >
+              <i class="i-ph-git-branch-bold mr-1" />
+              Git同步
             </button>
             <button
               type="button"
@@ -1325,6 +1372,140 @@ onUnmounted(() => {
             @click="handleAddWord"
           >
             添加
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Git同步对话框 -->
+    <div
+      v-if="showGitSyncDialog"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+      @click.self="showGitSyncDialog = false"
+    >
+      <div class="w-full max-w-3xl rounded-lg bg-white p-6 shadow-lg dark:bg-gray-800">
+        <h3 class="mb-4 text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <i class="i-ph-git-branch-bold" />
+          通过 Git 同步错题本
+        </h3>
+
+        <div class="mb-6 rounded-lg bg-blue-50 p-4 dark:bg-blue-900/30">
+          <p class="text-sm text-blue-700 dark:text-blue-300">
+            <i class="i-ph-info-bold mr-2" />
+            此功能将帮助你把错题本数据同步到其他电脑，适合在多台电脑间共享学习进度。
+          </p>
+        </div>
+
+        <!-- 步骤1: 导出并复制 -->
+        <div class="mb-6">
+          <div class="mb-3 flex items-center gap-2">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 1 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
+              1
+            </div>
+            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
+              导出错题本数据
+            </h4>
+          </div>
+          <div class="ml-10 space-y-3">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              点击下面的按钮，将当前错题本数据复制到剪贴板（共 {{ errorWords.length }} 个单词）
+            </p>
+            <button
+              type="button"
+              class="rounded-lg bg-orange-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-4 focus:ring-orange-300"
+              @click="exportAndCopy"
+            >
+              <i class="i-ph-copy-bold mr-2" />
+              复制错题本JSON数据
+            </button>
+            <div v-if="gitSyncStep >= 2" class="rounded-lg bg-green-100 p-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
+              <i class="i-ph-check-circle-bold mr-2" />
+              数据已复制到剪贴板！
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤2: 保存到项目文件 -->
+        <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
+          <div class="mb-3 flex items-center gap-2">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
+              2
+            </div>
+            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
+              保存到项目文件
+            </h4>
+          </div>
+          <div class="ml-10 space-y-2">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              打开项目目录，编辑文件：
+            </p>
+            <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
+              public/data/error-book.json
+            </code>
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              清空文件内容，粘贴刚才复制的JSON数据并保存
+            </p>
+          </div>
+        </div>
+
+        <!-- 步骤3: Git提交 -->
+        <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
+          <div class="mb-3 flex items-center gap-2">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
+              3
+            </div>
+            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
+              提交并推送到GitHub
+            </h4>
+          </div>
+          <div class="ml-10 space-y-2">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              在项目目录执行以下命令：
+            </p>
+            <div class="space-y-2">
+              <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
+                git add public/data/error-book.json
+              </code>
+              <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
+                git commit -m "update error book"
+              </code>
+              <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
+                git push
+              </code>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤4: 在另一台电脑导入 -->
+        <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
+          <div class="mb-3 flex items-center gap-2">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
+              4
+            </div>
+            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
+              在另一台电脑导入
+            </h4>
+          </div>
+          <div class="ml-10 space-y-2">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              在另一台电脑上，先拉取最新代码：
+            </p>
+            <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
+              git pull
+            </code>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mt-3">
+              然后打开错题本页面，点击 <span class="font-semibold text-indigo-600 dark:text-indigo-400">"导入"</span> 按钮，再点击 <span class="font-semibold text-indigo-600 dark:text-indigo-400">"自动导入项目错题本"</span> 即可！
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+            @click="showGitSyncDialog = false; gitSyncStep = 1"
+          >
+            关闭
           </button>
         </div>
       </div>
