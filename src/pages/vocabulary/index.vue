@@ -3,6 +3,7 @@
 import vocabulary from './vocabulary'
 import { addToErrorBook, removeFromErrorBook, isInErrorBook, getErrorBookStats } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
+import { isAltKeyPressed } from '~/composables/useKeyboard'
 
 const router = useRouter()
 const CHAPTER_KEY = 'vocabulary_chapter'
@@ -226,9 +227,9 @@ function onInputKeydown(e: KeyboardEvent, audioPath: string, item: any) {
       document.getElementById((Number(target.id) + 1).toString())?.focus()
     }
   }
-  else if (e.key === 'w' && e.altKey) {
+  else if (e.key === 'w' && isAltKeyPressed(e)) {
     e.preventDefault()
-    // Alt + W: 加入/取消错题本
+    // Alt + W: 加入/取消错题本（Mac 上 Option + W）
     toggleErrorBook(item)
   }
 }

@@ -14,6 +14,7 @@ export interface ErrorWord {
   addedAt: number // 添加时间戳
   reviewRecords?: ReviewRecord[] // 复习记录
   nextReviewDate?: number // 下次复习时间戳
+  isSpecialAttention?: boolean // 是否特别注意
 }
 
 const ERROR_BOOK_KEY = 'vocabulary_error_book'
@@ -300,5 +301,27 @@ export function formatReviewDate(timestamp: number): string {
   const month = reviewDate.getMonth() + 1
   const day = reviewDate.getDate()
   return `${month}月${day}日`
+}
+
+// 切换单词的特别注意状态
+export function toggleSpecialAttention(wordId: number, category: string): boolean {
+  const words = getErrorWords()
+  const word = words.find(w => w.id === wordId && w.category === category)
+  
+  if (!word) return false
+  
+  // 切换特别注意状态
+  word.isSpecialAttention = !word.isSpecialAttention
+  
+  // 保存
+  localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(words))
+  return true
+}
+
+// 检查单词是否为特别注意
+export function isSpecialAttention(wordId: number, category: string): boolean {
+  const words = getErrorWords()
+  const word = words.find(w => w.id === wordId && w.category === category)
+  return word?.isSpecialAttention || false
 }
 

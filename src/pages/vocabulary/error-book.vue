@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { getErrorWords, removeFromErrorBook, clearErrorBook, exportErrorBook, importErrorBook, addToErrorBook, getWordsToReview, markWordAsReviewed, getReviewStats, formatReviewDate, calculateNextReviewDate, type ErrorWord } from '~/composables/errorBook'
+import { getErrorWords, removeFromErrorBook, clearErrorBook, exportErrorBook, importErrorBook, addToErrorBook, getWordsToReview, markWordAsReviewed, getReviewStats, formatReviewDate, calculateNextReviewDate, toggleSpecialAttention, type ErrorWord } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
+import { isAltKeyPressed } from '~/composables/useKeyboard'
 
 const router = useRouter()
 
@@ -13,6 +14,7 @@ const isShowSource = ref(false)
 const trainingStats = ref('')
 const keyword = ref('')
 const selectedCategory = ref<string>('')
+const onlyShowSpecialAttention = ref(false) // 是否只显示特别注意的单词
 const showImportDialog = ref(false)
 const showAddDialog = ref(false)
 const importText = ref('')
@@ -63,6 +65,11 @@ const filteredWords = computed(() => {
       || w.meaning.toLowerCase().includes(kw)
       || w.pos.toLowerCase().includes(kw),
     )
+  }
+
+  // 只显示特别注意的单词
+  if (onlyShowSpecialAttention.value) {
+    words = words.filter(w => w.isSpecialAttention === true)
   }
 
   return words
@@ -142,6 +149,64 @@ function calcStats() {
 function removeWord(word: ErrorWord) {
   removeFromErrorBook(word.id, word.category)
   loadErrorWords()
+}
+
+// 切换单词的特别注意状态
+function toggleWordSpecialAttention(item: ErrorWord) {
+  const success = toggleSpecialAttention(item.id, item.category)
+  if (success) {
+    // 更新本地数据
+    const word = errorWords.value.find(w => w.id === item.id && w.category === item.category)
+    if (word) {
+      word.isSpecialAttention = !word.isSpecialAttention
+    }
+  }
+}
+
+// 根据单词内容和分类查找错题本中的单词
+function findWordInErrorBook(wordText: string, category: string): ErrorWord | null {
+  if (!wordText.trim() || !category.trim()) {
+    return null
+  }
+  const wordArray = wordText.split(',').map((w: string) => w.trim().toLowerCase()).filter(Boolean)
+  if (wordArray.length === 0) {
+    return null
+  }
+
+  return errorWords.value.find((w: ErrorWord) => {
+    if (w.category !== category) {
+      return false
+    }
+    // 检查单词是否匹配（不区分大小写）
+    const wWords = w.word.map((ww: string) => ww.toLowerCase().trim())
+    return wordArray.some((wa: string) => wWords.includes(wa)) || wWords.some((ww: string) => wordArray.includes(ww))
+  }) || null
+}
+
+// 计算属性：检查当前输入的单词是否已在错题本中
+const currentWordInErrorBook = computed(() => {
+  if (!newWord.value.word.trim() || !newWord.value.category.trim()) {
+    return null
+  }
+  return findWordInErrorBook(newWord.value.word, newWord.value.category)
+})
+
+// 从错题本移除当前输入的单词
+function removeCurrentWordFromErrorBook() {
+  const foundWord = currentWordInErrorBook.value
+  if (foundWord) {
+    removeFromErrorBook(foundWord.id, foundWord.category)
+    loadErrorWords()
+    // 清空表单
+    newWord.value = {
+      word: '',
+      pos: '',
+      meaning: '',
+      example: '',
+      extra: '',
+      category: '',
+    }
+  }
 }
 
 function handleExport() {
@@ -246,6 +311,7 @@ async function handleAutoImport() {
 function handleGitSync() {
   showGitSyncDialog.value = true
   gitSyncStep.value = 1
+  importResult.value = '' // 清空上次的消息
 }
 
 async function copyToClipboard(text: string) {
@@ -267,14 +333,32 @@ async function copyToClipboard(text: string) {
   }
 }
 
-async function exportAndCopy() {
-  const json = exportErrorBook()
-  const success = await copyToClipboard(json)
-  if (success) {
-    gitSyncStep.value = 2
+// 一键导出：自动保存到项目文件
+async function exportAndSaveToProject() {
+  try {
+    const json = exportErrorBook()
+
+    // 调用API保存到文件
+    const response = await fetch('/api/save-error-book', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: json,
+    })
+
+    const result = await response.json()
+
+    if (result.success) {
+      gitSyncStep.value = 2
+      importResult.value = '✅ ' + result.message
+    }
+    else {
+      importResult.value = '❌ ' + result.message
+    }
   }
-  else {
-    alert('复制失败，请手动复制下面的JSON内容')
+  catch (error) {
+    importResult.value = `❌ 保存失败: ${error instanceof Error ? error.message : '未知错误'}`
   }
 }
 
@@ -284,15 +368,24 @@ function handleAddWord() {
     return
   }
 
+  // 如果单词已存在，先移除再添加（实现更新功能）
+  const existingWord = currentWordInErrorBook.value
+  if (existingWord) {
+    removeFromErrorBook(existingWord.id, existingWord.category)
+  }
+
   const wordData: ErrorWord = {
-    id: Date.now(), // 使用时间戳作为临时ID
+    id: existingWord?.id || Date.now(), // 如果已存在，保留原ID；否则使用时间戳
     word: newWord.value.word.split(',').map(w => w.trim()).filter(Boolean),
     pos: newWord.value.pos || '-',
     meaning: newWord.value.meaning,
     example: newWord.value.example || '-',
     extra: newWord.value.extra || '-',
     category: newWord.value.category,
-    addedAt: Date.now(),
+    addedAt: existingWord?.addedAt || Date.now(), // 保留原添加时间
+    isSpecialAttention: existingWord?.isSpecialAttention, // 保留特别注意状态
+    reviewRecords: existingWord?.reviewRecords, // 保留复习记录
+    nextReviewDate: existingWord?.nextReviewDate, // 保留下次复习时间
   }
 
   addToErrorBook(wordData)
@@ -317,6 +410,9 @@ function handleClear() {
 }
 
 let audio = null
+// 跟踪当前播放的单词，用于在播放完成后更新状态
+let currentPlayingWord: ErrorWord | null = null
+
 function play(audioPath: string) {
   if (audio) {
     audio.pause()
@@ -324,7 +420,43 @@ function play(audioPath: string) {
   }
   audio = document.createElement('audio')
   audio.src = audioPath
+
+  // 查找对应的单词
+  const word = filteredWords.value.find(w =>
+    `vocabulary/audio/${w.category}/${w.word[0]}.mp3` === audioPath
+  )
+  currentPlayingWord = word || null
+
+  // 在音频播放完成时更新状态
+  audio.onended = () => {
+    updateWordStateAfterAudio()
+    currentPlayingWord = null
+  }
+
   audio.play()
+}
+
+// 在音频播放完成后更新错题本状态
+function updateWordStateAfterAudio() {
+  if (currentPlayingWord) {
+    // 找到对应的输入框并更新状态
+    const inputId = currentPlayingWord.id.toString()
+    const inputElement = document.getElementById(inputId) as HTMLInputElement
+    if (inputElement) {
+      const spellValue = inputElement.value.toLowerCase().trim()
+      const wordItem = currentPlayingWord as ErrorWord & { spellValue?: string; spellError?: boolean }
+      if (spellValue.length < 1) {
+        wordItem.spellValue = ''
+        wordItem.spellError = false
+      }
+      else {
+        wordItem.spellValue = spellValue
+        wordItem.spellError = !currentPlayingWord.word.map((v: string) => v.toLowerCase().trim()).includes(spellValue)
+      }
+    }
+  }
+  // 更新统计信息
+  trainingStats.value = calcStats()
 }
 
 // 自动播放功能
@@ -366,6 +498,30 @@ function playWordAtIndex(index: number) {
   currentAudio.value = newAudio
 
   newAudio.onended = () => {
+    // 音频播放完成后，更新当前单词的状态
+    // 使用 currentPlayingIndex 而不是闭包中的 index，确保获取正确的单词
+    if (currentPlayingIndex.value >= 0 && currentPlayingIndex.value < filteredWords.value.length) {
+      const currentWord = filteredWords.value[currentPlayingIndex.value]
+      if (currentWord) {
+        const inputId = currentWord.id.toString()
+        const inputElement = document.getElementById(inputId) as HTMLInputElement
+        if (inputElement) {
+          const spellValue = inputElement.value.toLowerCase().trim()
+          const wordItem = currentWord as ErrorWord & { spellValue?: string; spellError?: boolean }
+          if (spellValue.length < 1) {
+            wordItem.spellValue = ''
+            wordItem.spellError = false
+          }
+          else {
+            wordItem.spellValue = spellValue
+            wordItem.spellError = !currentWord.word.map((v: string) => v.toLowerCase().trim()).includes(spellValue)
+          }
+        }
+      }
+    }
+    // 更新统计信息
+    trainingStats.value = calcStats()
+
     // 只有在自动播放状态下才继续播放下一个
     if (isAutoPlaying.value) {
       // 音频播放完成后，等待指定间隔后播放下一个
@@ -477,21 +633,30 @@ function scrollToCurrentWord() {
 function handleErrorBookHotkeys(e: KeyboardEvent | MouseEvent) {
   // 只在错题本页面且不在输入框中时响应
   const target = e.target as HTMLElement
-  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-    return
+  // 对于键盘事件，如果在输入框中则忽略（Enter 键在输入框中的处理由 onInputKeydown 处理）
+  if (e instanceof KeyboardEvent) {
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') {
+      return
+    }
+  }
+  // 对于鼠标事件，如果在输入框、按钮或文本框中则忽略
+  else if (e instanceof MouseEvent) {
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') {
+      return
+    }
   }
 
   // 键盘快捷键
   if (e instanceof KeyboardEvent) {
-    // Alt + 左方向键（鼠标按钮5映射的"上一步"）：下一个
-    if (e.key === 'ArrowLeft' && e.altKey) {
+    // Alt + 左方向键（鼠标按钮5映射的"上一步"）：下一个（Mac 上 Option + 左方向键）
+    if (e.key === 'ArrowLeft' && isAltKeyPressed(e)) {
       e.preventDefault()
       e.stopPropagation()
       playNextWord()
       return
     }
     // 左方向键（鼠标按钮4映射）：上一个
-    if (e.key === 'ArrowLeft' && !e.altKey) {
+    if (e.key === 'ArrowLeft' && !isAltKeyPressed(e)) {
       e.preventDefault()
       e.stopPropagation()
       playPreviousWord()
@@ -523,6 +688,16 @@ function handleErrorBookHotkeys(e: KeyboardEvent | MouseEvent) {
       replayCurrentWord()
       return
     }
+    // Alt + W: 切换当前播放单词的特别注意状态（Mac 上 Option + W）
+    if (e.key === 'w' && isAltKeyPressed(e)) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (currentPlayingIndex.value >= 0 && currentPlayingIndex.value < filteredWords.value.length) {
+        const currentWord = filteredWords.value[currentPlayingIndex.value]
+        toggleWordSpecialAttention(currentWord)
+      }
+      return
+    }
   }
   // 鼠标按钮事件现在由 handleMouseEvent 单独处理
 }
@@ -547,7 +722,8 @@ function onInputFoucsOut(e: FocusEvent, item: ErrorWord) {
     wordItem.spellValue = spellValue
     wordItem.spellError = !item.word.map((v: string) => v.toLowerCase().trim()).includes(spellValue)
   }
-  trainingStats.value = calcStats()
+  // 不在输入时更新状态，避免卡顿，只在音频播放完成时更新
+  // trainingStats.value = calcStats()
 }
 
 function onInputFoucsIn(e: FocusEvent, audioPath: string) {
@@ -558,42 +734,53 @@ function onInputFoucsIn(e: FocusEvent, audioPath: string) {
 function onInputKeydown(e: KeyboardEvent, audioPath: string, item: ErrorWord) {
   e.stopPropagation()
   const { key, target } = e
-  
+
   if (key === ' ') {
-    e.preventDefault() // 阻止默认的空格键行为
+    // 在错题本中，Space 键不处理，让全局事件处理（用于暂停/继续播放）
+    // 只在 Ctrl+Space 时切换显示/隐藏例句
     if (e.ctrlKey) {
+      e.preventDefault()
       // Ctrl + Space: 切换显示/隐藏例句
       isShowExample.value = !isShowExample.value
     }
-    else {
-      // Space: 切换显示/隐藏单词（通过切换 isShowSource 状态）
-      isShowSource.value = !isShowSource.value
-    }
+    // 否则不阻止，让事件冒泡到全局处理
   }
   else if (key === 'Tab') {
     e.preventDefault() // 阻止默认的 Tab 行为
     // 重复播放当前单词的音频
     play(audioPath)
   }
-  else if (key === 'Enter') {
+  else if (key === 'Enter' && (target as HTMLInputElement).id) {
+    e.preventDefault()
+    const currentId = Number((target as HTMLInputElement).id)
+    // 在 filteredWords 中找到当前单词的索引
+    const currentIndex = filteredWords.value.findIndex(w => w.id === currentId)
+
     if (e.shiftKey) {
-      e.preventDefault()
       // Shift + Enter: 切换到上一个 input
-      const prevId = Number((target as HTMLInputElement).id) - 1
-      if (prevId > 0) {
-        document.getElementById(prevId.toString())?.focus()
+      if (currentIndex > 0) {
+        const prevWord = filteredWords.value[currentIndex - 1]
+        const prevInput = document.getElementById(prevWord.id.toString()) as HTMLInputElement
+        if (prevInput) {
+          prevInput.focus()
+        }
       }
     }
     else {
       // Enter: 切换到下一个 input
-      const nextId = Number((target as HTMLInputElement).id) + 1
-      document.getElementById(nextId.toString())?.focus()
+      if (currentIndex >= 0 && currentIndex < filteredWords.value.length - 1) {
+        const nextWord = filteredWords.value[currentIndex + 1]
+        const nextInput = document.getElementById(nextWord.id.toString()) as HTMLInputElement
+        if (nextInput) {
+          nextInput.focus()
+        }
+      }
     }
   }
-  else if (key === 'w' && e.altKey) {
+  else if (key === 'w' && isAltKeyPressed(e)) {
     e.preventDefault()
-    // Alt + W: 从错题本移除
-    removeWord(item)
+    // Alt + W: 切换特别注意状态（Mac 上 Option + W）
+    toggleWordSpecialAttention(item)
   }
 }
 
@@ -619,7 +806,13 @@ function copyText(item: ErrorWord) {
 function handleMouseEvent(e: MouseEvent) {
   // 只在错题本页面且不在输入框中时响应
   const target = e.target as HTMLElement
+  // 检查是否在输入框、按钮或文本框中
   if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') {
+    return
+  }
+  // 检查是否在可点击元素内（如链接、按钮等）
+  const clickableParent = target.closest('a, button, [role="button"]')
+  if (clickableParent && clickableParent !== target) {
     return
   }
 
@@ -630,11 +823,11 @@ function handleMouseEvent(e: MouseEvent) {
     playPreviousWord()
     return
   }
-  // 鼠标按钮5（JavaScript button 4，侧键前进）：上一个
+  // 鼠标按钮5（JavaScript button 4，侧键前进）：下一个
   if (e.button === 4) {
     e.preventDefault()
     e.stopPropagation()
-    playPreviousWord()
+    playNextWord()
     return
   }
   // 鼠标中键（button 1）：重播
@@ -802,7 +995,7 @@ onUnmounted(() => {
               <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">Alt</kbd>
               <span class="text-gray-500 dark:text-gray-400">+</span>
               <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">W</kbd>
-              <span class="text-gray-700 dark:text-gray-300">移除错题</span>
+              <span class="text-gray-700 dark:text-gray-300">特别注意</span>
             </div>
           </div>
         </div>
@@ -823,7 +1016,7 @@ onUnmounted(() => {
             {{ reviewMode === 'all' ? '只看待复习' : '显示全部' }}
           </button>
         </div>
-        
+
         <!-- 复习统计 -->
         <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div class="rounded-lg border border-purple-200 bg-white p-2 text-center dark:border-purple-700 dark:bg-gray-800">
@@ -976,8 +1169,13 @@ onUnmounted(() => {
             <span class="text-sm text-gray-600 dark:text-gray-400">
               正在播放: {{ currentPlayingIndex + 1 }} / {{ filteredWords.length }}
             </span>
-            <span v-if="currentPlayingIndex >= 0 && currentPlayingIndex < filteredWords.length" class="text-sm font-semibold text-blue-600 dark:text-blue-400">
+            <span v-if="currentPlayingIndex >= 0 && currentPlayingIndex < filteredWords.length" class="text-sm font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2">
               {{ filteredWords[currentPlayingIndex].word.join(', ') }}
+              <i
+                v-if="filteredWords[currentPlayingIndex].isSpecialAttention"
+                class="i-ph-star-fill text-yellow-500 dark:text-yellow-400"
+                title="特别注意"
+              />
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -993,12 +1191,20 @@ onUnmounted(() => {
             >
             <span class="text-sm text-gray-600 dark:text-gray-400">毫秒</span>
           </div>
+          <label class="inline-flex cursor-pointer items-center">
+            <input v-model="isShowMeaning" type="checkbox" class="peer sr-only">
+            <div
+              class="peer relative h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:border after:border-gray-300 dark:border-gray-600 after:rounded-full after:bg-white dark:bg-gray-700 peer-checked:bg-blue-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:peer-focus:ring-blue-800"
+            />
+            <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">显示释义</span>
+          </label>
           <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
             <span class="font-medium">快捷键：</span>
             <span>← 上一个</span>
             <span>→ 下一个</span>
             <span>空格 暂停/继续</span>
             <span>R 重播</span>
+            <span>Alt+W 特别注意</span>
             <span>鼠标4 上一个</span>
             <span>鼠标5 下一个</span>
             <span>中键 重播</span>
@@ -1058,6 +1264,13 @@ onUnmounted(() => {
             class="peer relative h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:border after:border-gray-300 dark:border-gray-600 after:rounded-full after:bg-white dark:bg-gray-700 peer-checked:bg-blue-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:peer-focus:ring-blue-800"
           />
           <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">自动播放</span>
+        </label>
+        <label class="inline-flex cursor-pointer items-center">
+          <input v-model="onlyShowSpecialAttention" type="checkbox" class="peer sr-only">
+          <div
+            class="peer relative h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:border after:border-gray-300 dark:border-gray-600 after:rounded-full after:bg-white dark:bg-gray-700 peer-checked:bg-yellow-500 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:peer-focus:ring-yellow-800"
+          />
+          <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">只显示特别注意</span>
         </label>
       </div>
 
@@ -1131,7 +1344,7 @@ onUnmounted(() => {
                           autocomplete="off"
                           :class="getInputStyleClass(item)"
                           type="text"
-                          :title="`按 Space 显示单词，按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Alt+W 移除错题`"
+                          :title="`按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Alt+W 切换特别注意`"
                           @focusout="onInputFoucsOut($event, item)"
                           @focusin="onInputFoucsIn($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`)"
                           @keydown="onInputKeydown($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`, item)"
@@ -1139,15 +1352,22 @@ onUnmounted(() => {
                       </template>
                     </td>
                     <td class="group relative whitespace-nowrap p-4">
-                      <div v-if="!isTrainingModel || isShowSource">
-                        <p v-for="w in item.word" :key="w">
-                          <a
-                            class="hover:underline"
-                            :title="`在剑桥词典中查询 ${w}`"
-                            target="_blank"
-                            :href="`https://dictionary.cambridge.org/dictionary/english-chinese-simplified/${w}`"
-                          >{{ w }}</a>
-                        </p>
+                      <div v-if="!isTrainingModel || isShowSource" class="flex items-center gap-2">
+                        <div class="flex-1">
+                          <p v-for="w in item.word" :key="w">
+                            <a
+                              class="hover:underline"
+                              :title="`在剑桥词典中查询 ${w}`"
+                              target="_blank"
+                              :href="`https://dictionary.cambridge.org/dictionary/english-chinese-simplified/${w}`"
+                            >{{ w }}</a>
+                          </p>
+                        </div>
+                        <i
+                          v-if="item.isSpecialAttention"
+                          class="i-ph-star-fill text-yellow-500 dark:text-yellow-400"
+                          title="特别注意"
+                        />
                         <div
                           class="absolute right-0 top-0 hidden h-100% items-center group-hover:flex"
                           @click="copyText(item)"
@@ -1155,8 +1375,13 @@ onUnmounted(() => {
                           <i class="i-ph-copy block cursor-pointer px-4" />
                         </div>
                       </div>
-                      <div v-else>
+                      <div v-else class="flex items-center gap-2">
                         <!-- 练习模式下单词被隐藏时的占位 -->
+                        <i
+                          v-if="item.isSpecialAttention"
+                          class="i-ph-star-fill text-yellow-500 dark:text-yellow-400"
+                          title="特别注意"
+                        />
                       </div>
                     </td>
                     <td style="font-style: italic; font-family: times;">
@@ -1172,14 +1397,24 @@ onUnmounted(() => {
                       {{ item.category }}
                     </td>
                     <td class="p-4">
-                      <button
-                        type="button"
-                        class="text-red-600 hover:text-red-700"
-                        @click="removeWord(item)"
-                        title="从错题本移除"
-                      >
-                        <i class="i-ph-trash text-xl" />
-                      </button>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          :class="item.isSpecialAttention ? 'text-yellow-500 hover:text-yellow-600 dark:text-yellow-400' : 'text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'"
+                          @click="toggleWordSpecialAttention(item)"
+                          :title="item.isSpecialAttention ? '取消特别注意 (Alt+W)' : '添加特别注意 (Alt+W)'"
+                        >
+                          <i :class="item.isSpecialAttention ? 'i-ph-star-fill text-xl' : 'i-ph-star text-xl'" />
+                        </button>
+                        <button
+                          type="button"
+                          class="text-red-600 hover:text-red-700"
+                          @click="removeWord(item)"
+                          title="从错题本移除"
+                        >
+                          <i class="i-ph-trash text-xl" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -1358,6 +1593,25 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+        <!-- 提示：单词已在错题本中 -->
+        <div v-if="currentWordInErrorBook" class="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-900/20">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i class="i-ph-warning-circle text-yellow-600 dark:text-yellow-400" />
+              <span class="text-sm text-yellow-800 dark:text-yellow-300">
+                该单词已在错题本中
+              </span>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 flex items-center gap-2"
+              @click="removeCurrentWordFromErrorBook"
+            >
+              <i class="i-ph-trash" />
+              移出错题本
+            </button>
+          </div>
+        </div>
         <div class="mt-6 flex justify-end gap-2">
           <button
             type="button"
@@ -1368,10 +1622,10 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
+            class="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="handleAddWord"
           >
-            添加
+            {{ currentWordInErrorBook ? '已存在' : '添加' }}
           </button>
         </div>
       </div>
@@ -1396,63 +1650,39 @@ onUnmounted(() => {
           </p>
         </div>
 
-        <!-- 步骤1: 导出并复制 -->
+        <!-- 步骤1: 一键导出到项目文件 -->
         <div class="mb-6">
           <div class="mb-3 flex items-center gap-2">
             <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 1 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
               1
             </div>
             <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
-              导出错题本数据
+              一键导出到项目文件
             </h4>
           </div>
           <div class="ml-10 space-y-3">
             <p class="text-sm text-gray-600 dark:text-gray-400">
-              点击下面的按钮，将当前错题本数据复制到剪贴板（共 {{ errorWords.length }} 个单词）
+              点击下面的按钮，自动将错题本保存到项目文件（共 {{ errorWords.length }} 个单词）
             </p>
             <button
               type="button"
               class="rounded-lg bg-orange-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-4 focus:ring-orange-300"
-              @click="exportAndCopy"
+              @click="exportAndSaveToProject"
             >
-              <i class="i-ph-copy-bold mr-2" />
-              复制错题本JSON数据
+              <i class="i-ph-floppy-disk-bold mr-2" />
+              自动保存到 public/data/error-book.json
             </button>
-            <div v-if="gitSyncStep >= 2" class="rounded-lg bg-green-100 p-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
-              <i class="i-ph-check-circle-bold mr-2" />
-              数据已复制到剪贴板！
+            <div v-if="importResult" class="rounded-lg p-3 text-sm" :class="importResult.includes('✅') ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'">
+              {{ importResult }}
             </div>
           </div>
         </div>
 
-        <!-- 步骤2: 保存到项目文件 -->
+        <!-- 步骤2: Git提交 -->
         <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
           <div class="mb-3 flex items-center gap-2">
             <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
               2
-            </div>
-            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
-              保存到项目文件
-            </h4>
-          </div>
-          <div class="ml-10 space-y-2">
-            <p class="text-sm text-gray-600 dark:text-gray-400">
-              打开项目目录，编辑文件：
-            </p>
-            <code class="block rounded-lg bg-gray-800 px-4 py-2 text-sm text-green-400 font-mono">
-              public/data/error-book.json
-            </code>
-            <p class="text-sm text-gray-600 dark:text-gray-400">
-              清空文件内容，粘贴刚才复制的JSON数据并保存
-            </p>
-          </div>
-        </div>
-
-        <!-- 步骤3: Git提交 -->
-        <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
-              3
             </div>
             <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
               提交并推送到GitHub
@@ -1476,11 +1706,11 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 步骤4: 在另一台电脑导入 -->
+        <!-- 步骤3: 在另一台电脑导入 -->
         <div class="mb-6" :class="gitSyncStep < 2 ? 'opacity-50' : ''">
           <div class="mb-3 flex items-center gap-2">
             <div class="flex h-8 w-8 items-center justify-center rounded-full" :class="gitSyncStep >= 2 ? 'bg-orange-600 text-white' : 'bg-gray-300 text-gray-600'">
-              4
+              3
             </div>
             <h4 class="text-lg font-semibold text-gray-900 dark:text-white">
               在另一台电脑导入
