@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getErrorWords, removeFromErrorBook, clearErrorBook, exportErrorBook, importErrorBook, addToErrorBook, getWordsToReview, markWordAsReviewed, getReviewStats, formatReviewDate, calculateNextReviewDate, toggleSpecialAttention, type ErrorWord } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
-import { isAltKeyPressed } from '~/composables/useKeyboard'
+import { isAltKeyPressed, isMac } from '~/composables/useKeyboard'
 
 const router = useRouter()
 
@@ -47,6 +47,11 @@ const categories = computed(() => {
   const cats = new Set<string>()
   errorWords.value.forEach(w => cats.add(w.category))
   return Array.from(cats).sort()
+})
+
+// 根据平台生成快捷键提示文本
+const specialAttentionShortcut = computed(() => {
+  return isMac() ? 'Command+W' : 'Alt+W'
 })
 
 const filteredWords = computed(() => {
@@ -688,7 +693,7 @@ function handleErrorBookHotkeys(e: KeyboardEvent | MouseEvent) {
       replayCurrentWord()
       return
     }
-    // Alt + W: 切换当前播放单词的特别注意状态（Mac 上 Option + W）
+    // Alt + W / Command + W: 切换当前播放单词的特别注意状态（Mac 上 Command + W）
     if (e.key === 'w' && isAltKeyPressed(e)) {
       e.preventDefault()
       e.stopPropagation()
@@ -779,7 +784,7 @@ function onInputKeydown(e: KeyboardEvent, audioPath: string, item: ErrorWord) {
   }
   else if (key === 'w' && isAltKeyPressed(e)) {
     e.preventDefault()
-    // Alt + W: 切换特别注意状态（Mac 上 Option + W）
+    // Alt + W / Command + W: 切换特别注意状态（Mac 上 Command + W）
     toggleWordSpecialAttention(item)
   }
 }
@@ -992,7 +997,7 @@ onUnmounted(() => {
               <span class="text-gray-700 dark:text-gray-300">上一个单词</span>
             </div>
             <div class="flex items-center gap-1.5">
-              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">Alt</kbd>
+              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">{{ isMac() ? 'Command' : 'Alt' }}</kbd>
               <span class="text-gray-500 dark:text-gray-400">+</span>
               <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">W</kbd>
               <span class="text-gray-700 dark:text-gray-300">特别注意</span>
@@ -1204,7 +1209,7 @@ onUnmounted(() => {
             <span>→ 下一个</span>
             <span>空格 暂停/继续</span>
             <span>R 重播</span>
-            <span>Alt+W 特别注意</span>
+            <span>{{ specialAttentionShortcut }} 特别注意</span>
             <span>鼠标4 上一个</span>
             <span>鼠标5 下一个</span>
             <span>中键 重播</span>
@@ -1344,7 +1349,7 @@ onUnmounted(() => {
                           autocomplete="off"
                           :class="getInputStyleClass(item)"
                           type="text"
-                          :title="`按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Alt+W 切换特别注意`"
+                          :title="`按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 ${specialAttentionShortcut} 切换特别注意`"
                           @focusout="onInputFoucsOut($event, item)"
                           @focusin="onInputFoucsIn($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`)"
                           @keydown="onInputKeydown($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`, item)"
@@ -1402,7 +1407,7 @@ onUnmounted(() => {
                           type="button"
                           :class="item.isSpecialAttention ? 'text-yellow-500 hover:text-yellow-600 dark:text-yellow-400' : 'text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'"
                           @click="toggleWordSpecialAttention(item)"
-                          :title="item.isSpecialAttention ? '取消特别注意 (Alt+W)' : '添加特别注意 (Alt+W)'"
+                          :title="item.isSpecialAttention ? `取消特别注意 (${specialAttentionShortcut})` : `添加特别注意 (${specialAttentionShortcut})`"
                         >
                           <i :class="item.isSpecialAttention ? 'i-ph-star-fill text-xl' : 'i-ph-star text-xl'" />
                         </button>
