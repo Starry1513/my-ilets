@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { getErrorWords, removeFromErrorBook, clearErrorBook, exportErrorBook, importErrorBook, addToErrorBook, getWordsToReview, markWordAsReviewed, getReviewStats, formatReviewDate, calculateNextReviewDate, toggleSpecialAttention, type ErrorWord } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
-import { isAltKeyPressed, isMac } from '~/composables/useKeyboard'
 
 const router = useRouter()
 
@@ -49,10 +48,8 @@ const categories = computed(() => {
   return Array.from(cats).sort()
 })
 
-// 根据平台生成快捷键提示文本
-const specialAttentionShortcut = computed(() => {
-  return isMac() ? 'Command+W' : 'Alt+W'
-})
+// 快捷键提示文本
+const specialAttentionShortcut = 'Shift+W'
 
 const filteredWords = computed(() => {
   // 根据模式选择数据源：全部 or 待复习
@@ -693,8 +690,8 @@ function handleErrorBookHotkeys(e: KeyboardEvent | MouseEvent) {
       replayCurrentWord()
       return
     }
-    // Alt + W / Command + W: 切换当前播放单词的特别注意状态（Mac 上 Command + W）
-    if (e.key === 'w' && isAltKeyPressed(e)) {
+    // Shift + W: 切换当前播放单词的特别注意状态
+    if (e.key === 'W' && e.shiftKey) {
       e.preventDefault()
       e.stopPropagation()
       if (currentPlayingIndex.value >= 0 && currentPlayingIndex.value < filteredWords.value.length) {
@@ -782,9 +779,9 @@ function onInputKeydown(e: KeyboardEvent, audioPath: string, item: ErrorWord) {
       }
     }
   }
-  else if (key === 'w' && isAltKeyPressed(e)) {
+  else if (key === 'W' && e.shiftKey) {
     e.preventDefault()
-    // Alt + W / Command + W: 切换特别注意状态（Mac 上 Command + W）
+    // Shift + W: 切换特别注意状态
     toggleWordSpecialAttention(item)
   }
 }
@@ -997,7 +994,7 @@ onUnmounted(() => {
               <span class="text-gray-700 dark:text-gray-300">上一个单词</span>
             </div>
             <div class="flex items-center gap-1.5">
-              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">{{ isMac() ? 'Command' : 'Alt' }}</kbd>
+              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">Shift</kbd>
               <span class="text-gray-500 dark:text-gray-400">+</span>
               <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">W</kbd>
               <span class="text-gray-700 dark:text-gray-300">特别注意</span>
@@ -1349,7 +1346,7 @@ onUnmounted(() => {
                           autocomplete="off"
                           :class="getInputStyleClass(item)"
                           type="text"
-                          :title="`按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 ${specialAttentionShortcut} 切换特别注意`"
+                          :title="`按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Shift+W 切换特别注意`"
                           @focusout="onInputFoucsOut($event, item)"
                           @focusin="onInputFoucsIn($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`)"
                           @keydown="onInputKeydown($event, `vocabulary/audio/${item.category}/${item.word[0]}.mp3`, item)"
@@ -1407,7 +1404,7 @@ onUnmounted(() => {
                           type="button"
                           :class="item.isSpecialAttention ? 'text-yellow-500 hover:text-yellow-600 dark:text-yellow-400' : 'text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400'"
                           @click="toggleWordSpecialAttention(item)"
-                          :title="item.isSpecialAttention ? `取消特别注意 (${specialAttentionShortcut})` : `添加特别注意 (${specialAttentionShortcut})`"
+                          :title="item.isSpecialAttention ? '取消特别注意 (Shift+W)' : '添加特别注意 (Shift+W)'"
                         >
                           <i :class="item.isSpecialAttention ? 'i-ph-star-fill text-xl' : 'i-ph-star text-xl'" />
                         </button>

@@ -3,7 +3,6 @@
 import vocabulary from './vocabulary'
 import { addToErrorBook, removeFromErrorBook, isInErrorBook, getErrorBookStats } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
-import { isAltKeyPressed } from '~/composables/useKeyboard'
 
 const router = useRouter()
 const CHAPTER_KEY = 'vocabulary_chapter'
@@ -227,9 +226,9 @@ function onInputKeydown(e: KeyboardEvent, audioPath: string, item: any) {
       document.getElementById((Number(target.id) + 1).toString())?.focus()
     }
   }
-  else if (e.key === 'w' && isAltKeyPressed(e)) {
+  else if (e.key === 'W' && e.shiftKey) {
     e.preventDefault()
-    // Alt + W: 加入/取消错题本（Mac 上 Option + W）
+    // Shift + W: 加入/取消错题本
     toggleErrorBook(item)
   }
 }
@@ -251,17 +250,19 @@ function checkSpelling(item: any, value: string) {
     const wordArray = Array.isArray(item.word) ? item.word : [item.word]
     item.spellError = !wordArray.map((v: string) => v.toLowerCase().trim()).includes(spellValue)
   }
-  trainingStats.value = calcStats()
 }
 
 function onInputFocusOut(e: FocusEvent, item: any) {
   const target = e.target as HTMLInputElement
   checkSpelling(item, target.value)
+  // 只在失焦时更新统计，避免每次输入都计算
+  trainingStats.value = calcStats()
 }
 
 function onInputChange(e: Event, item: any) {
   const target = e.target as HTMLInputElement
   checkSpelling(item, target.value)
+  // 移除实时统计更新，减少性能开销
 }
 
 function getInputStyleClass(item: any) {
@@ -380,7 +381,7 @@ const errorBookStats = computed(() => {
               <span class="text-gray-700 dark:text-gray-300">上一个单词</span>
             </div>
             <div class="flex items-center gap-1.5">
-              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">Alt</kbd>
+              <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">Shift</kbd>
               <span class="text-gray-500 dark:text-gray-400">+</span>
               <kbd class="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-600">W</kbd>
               <span class="text-gray-700 dark:text-gray-300">错题本</span>
@@ -558,8 +559,7 @@ const errorBookStats = computed(() => {
                             v-if="item.word && item.word.length > 0"
                             :id="item.id" autocomplete="off" :class="getInputStyleClass(item)"
                             type="text"
-                            :title="`按 Space 显示单词，按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Alt+W 错题本`"
-                            @input="onInputChange($event, item)"
+                            :title="`按 Space 显示单词，按 Ctrl+Space 显示例句，按 Tab 重复播放，按 Enter 下一个，按 Shift+Enter 上一个，按 Shift+W 错题本`"
                             @focusout="onInputFocusOut($event, item)"
                             @focusin="onInputFocusIn($event, `vocabulary/audio/${category}/${item.word[0]}.mp3`)"
                             @keydown="onInputKeydown($event, `vocabulary/audio/${category}/${item.word[0]}.mp3`, item)"
