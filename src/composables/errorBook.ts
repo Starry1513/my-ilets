@@ -67,18 +67,41 @@ export function clearErrorBook(): void {
   localStorage.removeItem(ERROR_BOOK_KEY)
 }
 
-// 导出错题本为JSON
+// 导出错题本为JSON（包含特别注意的单词统计）
 export function exportErrorBook(): string {
   const words = getErrorWords()
-  return JSON.stringify(words, null, 2)
+
+  // 筛选出特别注意的单词
+  const specialAttentionWords = words.filter(w => w.isSpecialAttention === true)
+
+  // 构建导出数据，包含完整单词列表和特别注意单词列表
+  const exportData = {
+    exportDate: new Date().toISOString(),
+    totalWords: words.length,
+    specialAttentionCount: specialAttentionWords.length,
+    allWords: words,
+    specialAttentionWords: specialAttentionWords,
+  }
+
+  return JSON.stringify(exportData, null, 2)
 }
 
 // 导入错题本
 export function importErrorBook(json: string): { success: boolean; message: string; count: number } {
   try {
-    const words = JSON.parse(json) as ErrorWord[]
-    if (!Array.isArray(words))
-      return { success: false, message: '导入数据格式错误：必须是数组', count: 0 }
+    const parsed = JSON.parse(json)
+
+    // 兼容新旧格式：新格式是对象（包含allWords字段），旧格式是数组
+    let words: ErrorWord[]
+    if (Array.isArray(parsed)) {
+      // 旧格式：直接是数组
+      words = parsed
+    } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.allWords)) {
+      // 新格式：包含allWords字段的对象
+      words = parsed.allWords
+    } else {
+      return { success: false, message: '导入数据格式错误：必须是数组或包含allWords字段的对象', count: 0 }
+    }
 
     // 验证数据结构
     for (const word of words) {
