@@ -43,6 +43,10 @@ export function addToErrorBook(word: ErrorWord): boolean {
   const newWord: ErrorWord = {
     ...word,
     addedAt: Date.now(),
+    // 显式初始化所有可选字段，确保数据完整性
+    reviewRecords: word.reviewRecords || [],
+    nextReviewDate: word.nextReviewDate || undefined,
+    isSpecialAttention: word.isSpecialAttention || false,
   }
   words.push(newWord)
   localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(words))
@@ -71,15 +75,23 @@ export function clearErrorBook(): void {
 export function exportErrorBook(): string {
   const words = getErrorWords()
 
+  // 确保所有单词都有完整的字段（规范化数据）
+  const normalizedWords = words.map(word => ({
+    ...word,
+    reviewRecords: word.reviewRecords || [],
+    nextReviewDate: word.nextReviewDate || undefined,
+    isSpecialAttention: word.isSpecialAttention || false,
+  }))
+
   // 筛选出特别注意的单词
-  const specialAttentionWords = words.filter(w => w.isSpecialAttention === true)
+  const specialAttentionWords = normalizedWords.filter(w => w.isSpecialAttention === true)
 
   // 构建导出数据，包含完整单词列表和特别注意单词列表
   const exportData = {
     exportDate: new Date().toISOString(),
-    totalWords: words.length,
+    totalWords: normalizedWords.length,
     specialAttentionCount: specialAttentionWords.length,
-    allWords: words,
+    allWords: normalizedWords,
     specialAttentionWords: specialAttentionWords,
   }
 
@@ -109,10 +121,18 @@ export function importErrorBook(json: string): { success: boolean; message: stri
         return { success: false, message: '导入数据格式错误：缺少必要字段', count: 0 }
     }
 
+    // 规范化导入的数据，确保所有可选字段都存在
+    const normalizedWords = words.map(word => ({
+      ...word,
+      reviewRecords: word.reviewRecords || [],
+      nextReviewDate: word.nextReviewDate || undefined,
+      isSpecialAttention: word.isSpecialAttention || false,
+    }))
+
     // 合并到现有错题本（去重）
     const existing = getErrorWords()
     const existingKeys = new Set(existing.map(w => `${w.id}-${w.category}`))
-    const newWords = words.filter(w => !existingKeys.has(`${w.id}-${w.category}`))
+    const newWords = normalizedWords.filter(w => !existingKeys.has(`${w.id}-${w.category}`))
 
     const merged = [...existing, ...newWords]
     localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(merged))
@@ -330,12 +350,12 @@ export function formatReviewDate(timestamp: number): string {
 export function toggleSpecialAttention(wordId: number, category: string): boolean {
   const words = getErrorWords()
   const word = words.find(w => w.id === wordId && w.category === category)
-  
+
   if (!word) return false
-  
-  // 切换特别注意状态
-  word.isSpecialAttention = !word.isSpecialAttention
-  
+
+  // 切换特别注意状态（确保 boolean 值）
+  word.isSpecialAttention = !(word.isSpecialAttention || false)
+
   // 保存
   localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(words))
   return true

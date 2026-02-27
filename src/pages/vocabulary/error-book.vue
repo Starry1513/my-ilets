@@ -723,6 +723,15 @@ function onInputFoucsOut(e: FocusEvent, item: ErrorWord) {
   else {
     wordItem.spellValue = spellValue
     wordItem.spellError = !item.word.map((v: string) => v.toLowerCase().trim()).includes(spellValue)
+
+    // 如果拼写正确，更新复习状态
+    if (!wordItem.spellError) {
+      const success = markWordAsReviewed(item.id, item.category)
+      if (success) {
+        // 重新加载错题本数据以反映更新
+        loadErrorWords()
+      }
+    }
   }
   // 不在输入时更新状态，避免卡顿，只在音频播放完成时更新
   // trainingStats.value = calcStats()
