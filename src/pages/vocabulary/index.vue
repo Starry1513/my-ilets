@@ -1,7 +1,7 @@
 <!-- eslint-disable eslint-comments/no-unlimited-disable -->
 <script setup lang="ts">
 import vocabulary from './vocabulary'
-import { addToErrorBook, removeFromErrorBook, isInErrorBook, getErrorBookStats } from '~/composables/errorBook'
+import { addToErrorBook, removeFromErrorBook, isInErrorBook, getErrorBookStats, getErrorWords, toggleSpecialAttention, type ErrorWord } from '~/composables/errorBook'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -14,6 +14,11 @@ const isAutoPlayWordAudio = ref(true)
 const isOnlyShowErrors = ref(false)
 const isFinishTraining = ref(false)
 const isShowSource = ref(false)
+
+// 错题本相关状态
+const showErrorBook = ref(false)
+const showOnlySpecialAttention = ref(false)
+const errorWords = ref<ErrorWord[]>([])
 
 const trainingStats = ref('')
 const keyword = ref('')
@@ -49,6 +54,25 @@ const wordList = computed(() => {
   } */
   return {}
 })
+
+// 当前章节的错题本单词
+const currentChapterErrorWords = computed(() => {
+  if (!category.value) return []
+  return errorWords.value.filter(word => word.category === category.value)
+})
+
+// 过滤后的错题本单词（根据特别注意筛选）
+const filteredErrorWords = computed(() => {
+  if (showOnlySpecialAttention.value) {
+    return currentChapterErrorWords.value.filter(word => word.isSpecialAttention === true)
+  }
+  return currentChapterErrorWords.value
+})
+
+// 加载错题本数据
+function loadErrorWords() {
+  errorWords.value = getErrorWords()
+}
 
 watch(category, (newVal, oldVal) => {
   // console.log(newVal, oldVal)
@@ -134,6 +158,7 @@ function handleVisibilityChange() {
 
 onMounted(() => {
   loaded.value = true
+  loadErrorWords() // 加载错题本数据
   document.addEventListener('keydown', handleKeydown)
 
   // 只能同时播放一个音频
@@ -337,6 +362,20 @@ function goToErrorBook() {
   router.push('/vocabulary/error-book')
 }
 
+// 从错题本移除单词
+function removeFromErrorBookInList(word: ErrorWord) {
+  removeFromErrorBook(word.id, word.category)
+  loadErrorWords()
+  // 强制更新统计
+  errorBookStatsKey.value++
+}
+
+// 切换特别注意状态
+function toggleWordSpecialAttention(word: ErrorWord) {
+  toggleSpecialAttention(word.id, word.category)
+  loadErrorWords()
+}
+
 // 使用 ref 来强制更新统计
 const errorBookStatsKey = ref(0)
 const errorBookStats = computed(() => {
@@ -471,6 +510,99 @@ const errorBookStats = computed(() => {
           </div>
         </div>
       </div>
+
+      <!-- 当前章节错题本 -->
+      <div v-if="currentChapterErrorWords.length > 0" class="mt-6 border border-orange-200 rounded-lg bg-orange-50 dark:border-orange-700 dark:bg-orange-900/20">
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="flex items-center gap-2 text-lg font-bold text-orange-700 dark:text-orange-400"
+                @click="showErrorBook = !showErrorBook"
+              >
+                <i :class="showErrorBook ? 'i-ph-caret-down-bold' : 'i-ph-caret-right-bold'" />
+                本章错题本 ({{ currentChapterErrorWords.length }})
+              </button>
+              <span v-if="showOnlySpecialAttention" class="text-sm text-orange-600 dark:text-orange-400">
+                特别注意: {{ filteredErrorWords.length }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="inline-flex cursor-pointer items-center">
+                <input v-model="showOnlySpecialAttention" type="checkbox" class="peer sr-only">
+                <div
+                  class="peer relative h-6 w-11 rounded-full bg-gray-200 after:absolute after:start-[2px] after:top-[2px] after:h-5 after:w-5 after:border after:border-gray-300 dark:border-gray-600 after:rounded-full after:bg-white dark:bg-gray-700 peer-checked:bg-orange-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-white dark:peer-focus:ring-orange-800 rtl:peer-checked:after:-translate-x-full"
+                />
+                <span class="ms-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                  <i class="i-ph-star-fill text-yellow-500" />
+                  仅特别注意
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div v-show="showErrorBook" class="space-y-2">
+            <div
+              v-for="word in filteredErrorWords"
+              :key="`${word.id}-${word.category}`"
+              class="flex items-center gap-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-orange-200 dark:border-orange-700"
+            >
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="font-bold text-gray-900 dark:text-white">
+                    {{ word.word.join(', ') }}
+                  </span>
+                  <span class="text-sm text-gray-500 dark:text-gray-400">{{ word.pos }}</span>
+                  <button
+                    type="button"
+                    class="ml-2"
+                    @click="toggleWordSpecialAttention(word)"
+                  >
+                    <i
+                      v-if="word.isSpecialAttention"
+                      class="i-ph-star-fill text-yellow-500 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300"
+                      title="取消特别注意"
+                    />
+                    <i
+                      v-else
+                      class="i-ph-star text-gray-400 hover:text-yellow-500 dark:text-gray-500 dark:hover:text-yellow-400"
+                      title="标记为特别注意"
+                    />
+                  </button>
+                </div>
+                <div class="text-sm text-gray-700 dark:text-gray-300">{{ word.meaning }}</div>
+                <div v-if="word.example" class="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">
+                  {{ word.example }}
+                </div>
+                <div v-if="word.reviewRecords && word.reviewRecords.length > 0" class="flex items-center gap-2 mt-2">
+                  <span class="text-xs text-gray-500 dark:text-gray-400">
+                    复习次数: {{ word.reviewRecords.length }}
+                  </span>
+                  <span v-if="word.nextReviewDate && word.nextReviewDate > 0" class="text-xs text-orange-600 dark:text-orange-400">
+                    下次复习: {{ new Date(word.nextReviewDate).toLocaleDateString() }}
+                  </span>
+                  <span v-else-if="word.reviewRecords.length >= 7" class="text-xs text-green-600 dark:text-green-400">
+                    ✓ 已完成复习
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white hover:bg-red-600"
+                @click="removeFromErrorBookInList(word)"
+                title="从错题本移除"
+              >
+                <i class="i-ph-x-bold" />
+              </button>
+            </div>
+            <div v-if="filteredErrorWords.length === 0" class="text-center text-gray-500 dark:text-gray-400 py-4">
+              暂无特别注意的单词
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Table -->
       <div class="mt-6 flex flex-col">
         <div class="overflow-x-auto rounded-lg">

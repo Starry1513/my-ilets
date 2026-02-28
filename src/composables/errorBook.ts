@@ -46,7 +46,7 @@ export function addToErrorBook(word: ErrorWord): boolean {
     // 显式初始化所有可选字段，确保数据完整性
     reviewRecords: word.reviewRecords || [],
     nextReviewDate: word.nextReviewDate || undefined,
-    isSpecialAttention: word.isSpecialAttention || false,
+    isSpecialAttention: word.isSpecialAttention === true, // 显式检查 true
   }
   words.push(newWord)
   localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(words))
@@ -80,7 +80,7 @@ export function exportErrorBook(): string {
     ...word,
     reviewRecords: word.reviewRecords || [],
     nextReviewDate: word.nextReviewDate || undefined,
-    isSpecialAttention: word.isSpecialAttention || false,
+    isSpecialAttention: word.isSpecialAttention === true, // 显式检查 true，确保导出正确的布尔值
   }))
 
   // 筛选出特别注意的单词
@@ -126,17 +126,72 @@ export function importErrorBook(json: string): { success: boolean; message: stri
       ...word,
       reviewRecords: word.reviewRecords || [],
       nextReviewDate: word.nextReviewDate || undefined,
-      isSpecialAttention: word.isSpecialAttention || false,
+      isSpecialAttention: word.isSpecialAttention === true, // 显式检查 true
     }))
 
-    // 合并到现有错题本（去重）
+    // 合并到现有错题本（智能合并）
     const existing = getErrorWords()
-    const existingKeys = new Set(existing.map(w => `${w.id}-${w.category}`))
-    const newWords = normalizedWords.filter(w => !existingKeys.has(`${w.id}-${w.category}`))
+    const existingMap = new Map(existing.map(w => [`${w.id}-${w.category}`, w]))
 
-    const merged = [...existing, ...newWords]
+    let newCount = 0
+    let updatedCount = 0
+
+    const merged = normalizedWords.map(importWord => {
+      const key = `${importWord.id}-${importWord.category}`
+      const existingWord = existingMap.get(key)
+
+      if (existingWord) {
+        // 单词已存在，智能合并信息
+        updatedCount++
+
+        // 合并复习记录（按时间戳去重）
+        const allRecords = [...(existingWord.reviewRecords || []), ...(importWord.reviewRecords || [])]
+        const recordMap = new Map(allRecords.map(r => [r.reviewDate, r]))
+        const mergedRecords = Array.from(recordMap.values()).sort((a, b) => a.reviewDate - b.reviewDate)
+
+        return {
+          ...existingWord,
+          // 特别注意：如果任意一方为 true，结果为 true
+          isSpecialAttention: existingWord.isSpecialAttention === true || importWord.isSpecialAttention === true,
+          // 使用合并后的复习记录
+          reviewRecords: mergedRecords,
+          // 重新计算下次复习时间
+          nextReviewDate: calculateNextReviewDate({
+            ...existingWord,
+            reviewRecords: mergedRecords,
+          }),
+        }
+      } else {
+        // 新单词
+        newCount++
+        existingMap.set(key, importWord)
+        return importWord
+      }
+    })
+
+    // 添加导入数据中不存在但本地存在的单词
+    for (const existingWord of existing) {
+      const key = `${existingWord.id}-${existingWord.category}`
+      if (!normalizedWords.some(w => `${w.id}-${w.category}` === key)) {
+        merged.push(existingWord)
+      }
+    }
+
     localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(merged))
-    return { success: true, message: `成功导入 ${newWords.length} 个单词，${words.length - newWords.length} 个已存在`, count: newWords.length }
+
+    if (updatedCount > 0) {
+      return {
+        success: true,
+        message: `成功导入 ${newCount} 个新单词，更新 ${updatedCount} 个已存在单词`,
+        count: newCount
+      }
+    } else {
+      return {
+        success: true,
+        message: `成功导入 ${newCount} 个单词`,
+        count: newCount
+      }
+    }
   }
   catch (error) {
     return { success: false, message: `导入失败：${error instanceof Error ? error.message : '未知错误'}`, count: 0 }
@@ -353,8 +408,8 @@ export function toggleSpecialAttention(wordId: number, category: string): boolea
 
   if (!word) return false
 
-  // 切换特别注意状态（确保 boolean 值）
-  word.isSpecialAttention = !(word.isSpecialAttention || false)
+  // 切换特别注意状态（确保 boolean 值的正确性）
+  word.isSpecialAttention = !(word.isSpecialAttention === true)
 
   // 保存
   localStorage.setItem(ERROR_BOOK_KEY, JSON.stringify(words))
@@ -365,6 +420,6 @@ export function toggleSpecialAttention(wordId: number, category: string): boolea
 export function isSpecialAttention(wordId: number, category: string): boolean {
   const words = getErrorWords()
   const word = words.find(w => w.id === wordId && w.category === category)
-  return word?.isSpecialAttention || false
+  return word?.isSpecialAttention === true
 }
 
